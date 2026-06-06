@@ -2,6 +2,11 @@ import express from "express";
 import cors from "cors";
 import Groq from "groq-sdk";
 import mongoose from "mongoose";
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -45,6 +50,9 @@ const DEFAULT_MODEL = "llama-3.3-70b-versatile";
 
 app.use(cors());
 app.use(express.json());
+
+// ─── Phục vụ frontend React (đã build) ─────────────────────────────────────────
+app.use(express.static(path.join(__dirname, 'dist')));
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get("/api/healthz", (_req, res) => {
@@ -225,6 +233,11 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
     console.error("Error:", err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// ─── Tất cả các route không phải API trả về index.html ──────────────────────────
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
 app.listen(PORT, () => {
