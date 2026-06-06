@@ -51,8 +51,8 @@ const DEFAULT_MODEL = "llama-3.3-70b-versatile";
 app.use(cors());
 app.use(express.json());
 
-// ─── Phục vụ frontend React (đã build) ─────────────────────────────────────────
-app.use(express.static(path.join(__dirname, 'dist')));
+// ─── Phục vụ file HTML tĩnh ───────────────────────────────────────────────────
+app.use(express.static(path.join(__dirname, '.'))); // Phục vụ file trong thư mục hiện tại
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get("/api/healthz", (_req, res) => {
@@ -235,9 +235,9 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
   }
 });
 
-// ─── Tất cả các route không phải API trả về index.html ──────────────────────────
-app.get('*', (_req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+// ─── Route mặc định trả về index.html ──────────────────────────────────────────
+app.get('/', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 app.listen(PORT, () => {
