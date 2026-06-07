@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import Groq from "groq-sdk";
+import OpenAI from "openai"; // DeepSeek dùng OpenAI SDK
 import mongoose from "mongoose";
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -10,10 +10,14 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/groqchat";
+const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/deepseekchat";
 
-// ─── Groq client ──────────────────────────────────────────────────────────────
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+// ─── DeepSeek client ──────────────────────────────────────────────────────────────
+// DeepSeek dùng baseURL riêng và API key từ platform.deepseek.com
+const deepseek = new OpenAI({
+  apiKey: process.env.DEEPSEEK_API_KEY, // Biến môi trường DEEPSEEK_API_KEY
+  baseURL: "https://api.deepseek.com/v1", // Endpoint của DeepSeek
+});
 
 // ─── SYSTEM PROMPT MẶC ĐỊNH - NHÂN CÁCH AI ────────────────────────────────────
 const DEFAULT_SYSTEM_PROMPT = `Bạn là CRAB, một trợ lý AI thông minh và thân thiện được tạo ra bởi **Kiều Thanh Hải** (Hải) - founder, sole developer và PM của CRABOR (CÔNG TY TNHH GIẢI PHÁP CÔNG NGHỆ CRABOR).
@@ -69,15 +73,16 @@ mongoose.connect(MONGO_URI)
   .then(() => console.log("🦀 MongoDB connected:", MONGO_URI))
   .catch(err => { console.error("MongoDB connection error:", err.message); process.exit(1); });
 
-// ─── Models Groq có sẵn ───────────────────────────────────────────────────────
+// ─── Models DeepSeek có sẵn ───────────────────────────────────────────────────────
+// DeepSeek cung cấp các model chính
 const AVAILABLE_MODELS = [
-  { id: "llama-3.3-70b-versatile", name: "Llama 3.3 70B Versatile", contextWindow: 128000 },
-  { id: "llama-3.1-8b-instant",    name: "Llama 3.1 8B Instant",    contextWindow: 128000 },
-  { id: "mixtral-8x7b-32768",      name: "Mixtral 8x7B",            contextWindow: 32768  },
-  { id: "gemma2-9b-it",            name: "Gemma 2 9B",              contextWindow: 8192   },
+  { id: "deepseek-chat",        name: "DeepSeek Chat",        contextWindow: 64000 },
+  { id: "deepseek-coder",       name: "DeepSeek Coder",       contextWindow: 64000 },
+  { id: "deepseek-chat-1.5",    name: "DeepSeek Chat 1.5",    contextWindow: 64000 },
+  { id: "deepseek-coder-1.5",   name: "DeepSeek Coder 1.5",   contextWindow: 64000 },
 ];
 
-const DEFAULT_MODEL = "llama-3.3-70b-versatile";
+const DEFAULT_MODEL = "deepseek-chat";
 
 app.use(cors());
 app.use(express.json());
@@ -93,7 +98,7 @@ app.get("/api/healthz", (_req, res) => {
 // ─── Thông tin về AI và người tạo ─────────────────────────────────────────────
 app.get("/api/about", (_req, res) => {
   res.json({
-    name: "CRAB AI Assistant",
+    name: "CRAB AI Assistant (Powered by DeepSeek)",
     creator: {
       fullName: "Kiều Thanh Hải",
       role: "Founder, Sole Developer & PM of CRABOR",
@@ -106,7 +111,7 @@ app.get("/api/about", (_req, res) => {
       mascot: "Crab with big round eyes",
       style: "Cute, friendly, playful"
     },
-    version: "2.0 - with Hải's persona"
+    version: "2.0 - with Hải's persona on DeepSeek"
   });
 });
 
@@ -243,18 +248,18 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
       systemPrompt = DEFAULT_SYSTEM_PROMPT;
     }
 
-    const groqMessages = [];
-    if (systemPrompt) groqMessages.push({ role: "system", content: systemPrompt });
+    const deepseekMessages = [];
+    if (systemPrompt) deepseekMessages.push({ role: "system", content: systemPrompt });
     for (const msg of history) {
       if (msg.role === "user" || msg.role === "assistant") {
-        groqMessages.push({ role: msg.role, content: msg.content });
+        deepseekMessages.push({ role: msg.role, content: msg.content });
       }
     }
 
-    // Gọi Groq API
-    const completion = await groq.chat.completions.create({
-      model,
-      messages: groqMessages,
+    // Gọi DeepSeek API (tương thích OpenAI SDK)
+    const completion = await deepseek.chat.completions.create({
+      model: model,
+      messages: deepseekMessages,
       max_tokens: 4096,
       temperature: 0.7,
     });
@@ -277,8 +282,8 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
     // Tự động tạo tiêu đề nếu vẫn là mặc định
     if (conv.title === "New Conversation") {
       try {
-        const titleResp = await groq.chat.completions.create({
-          model: "llama-3.1-8b-instant",
+        const titleResp = await deepseek.chat.completions.create({
+          model: "deepseek-chat",
           messages: [{
             role: "user",
             content: `Tạo tiêu đề ngắn gọn (tối đa 6 từ, không dùng dấu ngoặc kép) cho cuộc hội thoại bắt đầu bằng: "${content.substring(0, 200)}"`,
@@ -305,7 +310,7 @@ app.post("/api/ask-about-hai", async (req, res) => {
     const { question } = req.body;
     if (!question) return res.status(400).json({ error: "Question is required" });
 
-    const response = await groq.chat.completions.create({
+    const response = await deepseek.chat.completions.create({
       model: DEFAULT_MODEL,
       messages: [
         { role: "system", content: DEFAULT_SYSTEM_PROMPT },
@@ -327,6 +332,6 @@ app.get('/', (_req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🦀 CRAB AI Server đang chạy tại http://localhost:${PORT}`);
+  console.log(`🦀 CRAB AI Server (DeepSeek) đang chạy tại http://localhost:${PORT}`);
   console.log(`🦀 AI được tạo ra bởi Kiều Thanh Hải (Founder CRABOR)`);
 });
