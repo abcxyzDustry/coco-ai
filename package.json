@@ -1,16 +1,17 @@
 {
-  "name": "deepseek-chat-server",
+  "name": "crabor-chat-server",
   "version": "1.0.0",
   "type": "module",
+  "description": "CRAB AI Assistant Backend - Powered by Cloudflare Workers AI",
   "scripts": {
     "build": "vite build",
     "start": "node server.js",
-    "dev": "vite"
+    "dev": "vite",
+    "server": "node index.js"
   },
   "dependencies": {
     "express": "^4.18.2",
     "cors": "^2.8.5",
-    "openai": "^4.28.0",
     "mongoose": "^8.0.0",
     "path": "^0.12.7"
   },
@@ -18,5 +19,8 @@
     "vite": "^5.0.0",
     "@vitejs/plugin-react": "^4.2.0",
     "typescript": "^5.0.0"
-  }
+  },
+  "keywords": ["crabor", "ai-assistant", "cloudflare-ai", "chatbot", "vietnamese-ai"],
+  "author": "Kiều Thanh Hải - CRABOR",
+  "license": "MIT"
 }
