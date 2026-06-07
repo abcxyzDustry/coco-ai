@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/cloudflarechat";
+const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/crabor-chat";
 
 // Cloudflare API endpoint
 const CLOUDFLARE_API_URL = "https://llm-chat-app-template.djthewolf9.workers.dev";
@@ -59,8 +59,11 @@ const Conversation = mongoose.model("Conversation", conversationSchema);
 
 // ─── Kết nối MongoDB ──────────────────────────────────────────────────────────
 mongoose.connect(MONGO_URI)
-  .then(() => console.log("MongoDB connected:", MONGO_URI))
-  .catch(err => { console.error("MongoDB connection error:", err.message); process.exit(1); });
+  .then(() => console.log("✅ MongoDB connected:", MONGO_URI))
+  .catch(err => { 
+    console.error("❌ MongoDB connection error:", err.message); 
+    process.exit(1); 
+  });
 
 // ─── Models có sẵn ──────────────────────────────────────────────────────────
 const AVAILABLE_MODELS = [
@@ -76,45 +79,35 @@ const DEFAULT_MODEL = "@cf/meta/llama-3.3-70b-instruct";
 app.use(cors());
 app.use(express.json());
 
-// Helper function để gọi Cloudflare API
-async function callCloudflareAPI(messages, model, systemPrompt = null) {
-  const fullMessages = [];
-  
-  if (systemPrompt) {
-    fullMessages.push({ role: "system", content: systemPrompt });
-  }
-  fullMessages.push(...messages);
-
-  const response = await fetch(CLOUDFLARE_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
+// ─── ROOT ROUTE (QUAN TRỌNG - sửa lỗi "Cannot GET /") ─────────────────────────
+app.get("/", (_req, res) => {
+  res.json({
+    name: "🦀 CRAB AI Assistant API",
+    version: "1.0.0",
+    status: "online",
+    endpoints: {
+      health: "GET /api/healthz",
+      models: "GET /api/models",
+      conversations: "GET /api/conversations",
+      createConversation: "POST /api/conversations",
+      conversationDetail: "GET /api/conversations/:id",
+      deleteConversation: "DELETE /api/conversations/:id",
+      updateTitle: "PATCH /api/conversations/:id/title",
+      messages: "GET /api/conversations/:id/messages",
+      sendMessage: "POST /api/conversations/:id/messages"
     },
-    body: JSON.stringify({
-      messages: fullMessages,
-      model: model,
-      stream: false,
-    }),
+    author: "Kiều Thanh Hải - CRABOR",
+    documentation: "https://github.com/your-repo"
   });
-
-  if (!response.ok) {
-    throw new Error(`Cloudflare API error: ${response.statusText}`);
-  }
-
-  const data = await response.json();
-  
-  // Định dạng response để tương thích với cấu trúc cũ
-  return {
-    content: data.response || data.message?.content || "",
-    usage: {
-      completion_tokens: data.usage?.completion_tokens || null,
-    },
-  };
-}
+});
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get("/api/healthz", (_req, res) => {
-  res.json({ status: "ok" });
+  res.json({ 
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    mongodb: mongoose.connection.readyState === 1 ? "connected" : "disconnected"
+  });
 });
 
 // ─── Models ───────────────────────────────────────────────────────────────────
@@ -142,7 +135,6 @@ app.get("/api/conversations", async (_req, res) => {
 app.post("/api/conversations", async (req, res) => {
   try {
     const { title = "New Conversation", model = null, systemPrompt = null } = req.body || {};
-    // Nếu không có systemPrompt được truyền vào, sử dụng DEFAULT_SYSTEM_PROMPT
     const finalSystemPrompt = systemPrompt !== undefined ? systemPrompt : DEFAULT_SYSTEM_PROMPT;
     const conv = await Conversation.create({ title, model, systemPrompt: finalSystemPrompt });
     res.status(201).json({ ...conv.toObject(), id: conv._id, messageCount: 0 });
@@ -206,6 +198,41 @@ app.get("/api/conversations/:id/messages", async (req, res) => {
   }
 });
 
+// Helper function để gọi Cloudflare API
+async function callCloudflareAPI(messages, model, systemPrompt = null) {
+  const fullMessages = [];
+  
+  if (systemPrompt) {
+    fullMessages.push({ role: "system", content: systemPrompt });
+  }
+  fullMessages.push(...messages);
+
+  const response = await fetch(CLOUDFLARE_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messages: fullMessages,
+      model: model,
+      stream: false,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Cloudflare API error: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  
+  return {
+    content: data.response || data.message?.content || "",
+    usage: {
+      completion_tokens: data.usage?.completion_tokens || null,
+    },
+  };
+}
+
 // Gửi tin nhắn → nhận phản hồi AI từ Cloudflare
 app.post("/api/conversations/:id/messages", async (req, res) => {
   try {
@@ -222,15 +249,14 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
     // Lấy toàn bộ lịch sử
     const history = await Message.find({ conversationId: convId }).sort({ createdAt: 1 }).lean();
     
-    const model        = reqModel        || conv.model        || DEFAULT_MODEL;
-    // Ưu tiên systemPrompt từ request, nếu không thì lấy từ conversation, cuối cùng là default
+    const model = reqModel || conv.model || DEFAULT_MODEL;
     const systemPrompt = reqSystemPrompt !== undefined 
       ? reqSystemPrompt 
       : (conv.systemPrompt !== undefined && conv.systemPrompt !== null 
           ? conv.systemPrompt 
           : DEFAULT_SYSTEM_PROMPT);
 
-    // Chuẩn bị messages cho Cloudflare (chỉ lấy user và assistant)
+    // Chuẩn bị messages cho Cloudflare
     const cloudflareMessages = [];
     for (const msg of history) {
       if (msg.role === "user" || msg.role === "assistant") {
@@ -268,7 +294,7 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
             content: `Tạo tiêu đề ngắn gọn (tối đa 6 từ, không dùng dấu ngoặc kép) cho cuộc hội thoại bắt đầu bằng: "${content.substring(0, 200)}"`,
           }],
           "@cf/meta/llama-3.1-8b-instruct",
-          null // Không cần system prompt cho title generation
+          null
         );
         
         if (generatedTitle) {
@@ -287,7 +313,18 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
   }
 });
 
+// ─── Handle 404 - Bắt các route không tồn tại ─────────────────────────────────
+app.use("*", (_req, res) => {
+  res.status(404).json({
+    error: "Route not found",
+    message: "Please check API documentation at GET /"
+  });
+});
+
+// ─── Start server ─────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
-  console.log(`🦀 CRAB - CloudflareChat server đang chạy tại http://localhost:${PORT}`);
-  console.log(`Default System Prompt đã được cấu hình cho CRAB AI Assistant`);
+  console.log(`\n🦀 CRAB AI Assistant Server`);
+  console.log(`📡 Running at http://localhost:${PORT}`);
+  console.log(`✅ Health check: http://localhost:${PORT}/api/healthz`);
+  console.log(`📚 API docs: http://localhost:${PORT}/\n`);
 });
