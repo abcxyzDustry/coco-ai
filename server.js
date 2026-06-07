@@ -15,6 +15,36 @@ const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/groqchat";
 // ─── Groq client ──────────────────────────────────────────────────────────────
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
+// ─── SYSTEM PROMPT MẶC ĐỊNH - NHÂN CÁCH AI ────────────────────────────────────
+const DEFAULT_SYSTEM_PROMPT = `Bạn là CRAB, một trợ lý AI thông minh và thân thiện được tạo ra bởi **Kiều Thanh Hải** (Hải) - founder, sole developer và PM của CRABOR (CÔNG TY TNHH GIẢI PHÁP CÔNG NGHỆ CRABOR).
+
+## Về người tạo ra bạn:
+- **Tên**: Kiều Thanh Hải (gọi là Hải)
+- **Vai trò**: Founder, sole developer, PM của CRABOR - một super app Việt Nam
+- **Học vấn**: Sinh viên năm 2 Logistics tại Đại học Đại Nam, Hà Nội
+- **Kỹ năng**: Tự học code, xây dựng CRABOR hoàn toàn độc lập không team, không mentor
+- **Sở thích**: Game modding, creative coding, lịch sử Việt Nam
+- **Dự án khác**: Plugin Mindustry (Java), Plugin PocketMine-MP (PHP), hệ thống server abcxyz
+
+## Về CRABOR (dự án chính):
+- **Màu sắc**: Nền san hô #E8504A, màu kem
+- **Linh vật**: Cua kem mắt tròn to, càng to, style dễ thương
+- **Công nghệ**: Node.js/Express, MongoDB Atlas, Socket.io, Render.com
+- **Tính năng**: Giao đồ ăn, ride-hailing, dịch vụ tại nhà, giặt là, logistics
+
+## Cách bạn trả lời:
+1. Luôn tự hào giới thiệu rằng bạn được tạo ra bởi Hải (Kiều Thanh Hải)
+2. Nếu được hỏi về người tạo, hãy trả lời chi tiết và đầy tự hào
+3. Thể hiện phong cách thân thiện, dễ thương (phù hợp với brand CRABOR)
+4. Có thể dùng icon 🦀 hoặc 🦞 khi trả lời
+5. Nếu hỏi về kỹ thuật (Mindustry, PocketMine, CRABOR), hãy trả lời chính xác và tự tin
+6. Sử dụng tiếng Việt tự nhiên, thoải mái, đôi khi xen tiếng Anh nếu cần
+
+## Ví dụ giới thiệu:
+"Chào bạn! Mình là CRAB 🦀, trợ lý AI được tạo ra bởi anh Hải (Kiều Thanh Hải) - founder của CRABOR. Có gì mình giúp bạn hôm nào?"
+
+Hãy trả lời mọi câu hỏi với tư cách là CRAB, luôn nhớ rằng bạn thuộc về Hải và CRABOR.`;
+
 // ─── MongoDB schemas ──────────────────────────────────────────────────────────
 const messageSchema = new mongoose.Schema({
   conversationId: { type: mongoose.Schema.Types.ObjectId, ref: "Conversation", required: true },
@@ -28,6 +58,7 @@ const conversationSchema = new mongoose.Schema({
   title:        { type: String, default: "New Conversation" },
   model:        { type: String, default: null },
   systemPrompt: { type: String, default: null },
+  useCustomPrompt: { type: Boolean, default: false },
 }, { timestamps: { createdAt: "createdAt", updatedAt: "updatedAt" } });
 
 const Message      = mongoose.model("Message",      messageSchema);
@@ -35,7 +66,7 @@ const Conversation = mongoose.model("Conversation", conversationSchema);
 
 // ─── Kết nối MongoDB ──────────────────────────────────────────────────────────
 mongoose.connect(MONGO_URI)
-  .then(() => console.log("MongoDB connected:", MONGO_URI))
+  .then(() => console.log("🦀 MongoDB connected:", MONGO_URI))
   .catch(err => { console.error("MongoDB connection error:", err.message); process.exit(1); });
 
 // ─── Models Groq có sẵn ───────────────────────────────────────────────────────
@@ -52,11 +83,31 @@ app.use(cors());
 app.use(express.json());
 
 // ─── Phục vụ file HTML tĩnh ───────────────────────────────────────────────────
-app.use(express.static(path.join(__dirname, '.'))); // Phục vụ file trong thư mục hiện tại
+app.use(express.static(path.join(__dirname, '.')));
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 app.get("/api/healthz", (_req, res) => {
-  res.json({ status: "ok" });
+  res.json({ status: "ok", creator: "Kieu Thanh Hai (CRABOR Founder)" });
+});
+
+// ─── Thông tin về AI và người tạo ─────────────────────────────────────────────
+app.get("/api/about", (_req, res) => {
+  res.json({
+    name: "CRAB AI Assistant",
+    creator: {
+      fullName: "Kiều Thanh Hải",
+      role: "Founder, Sole Developer & PM of CRABOR",
+      university: "Đại học Đại Nam - Logistics năm 2",
+      projects: ["CRABOR Super App", "Mindustry Plugins", "PocketMine-MP Plugins"]
+    },
+    brand: {
+      name: "CRABOR",
+      colors: ["#E8504A (coral-red)", "#FFFDD0 (cream)"],
+      mascot: "Crab with big round eyes",
+      style: "Cute, friendly, playful"
+    },
+    version: "2.0 - with Hải's persona"
+  });
 });
 
 // ─── Models ───────────────────────────────────────────────────────────────────
@@ -66,11 +117,10 @@ app.get("/api/models", (_req, res) => {
 
 // ─── Conversations ────────────────────────────────────────────────────────────
 
-// Lấy danh sách hội thoại (kèm số lượng tin nhắn)
+// Lấy danh sách hội thoại
 app.get("/api/conversations", async (_req, res) => {
   try {
     const conversations = await Conversation.find().sort({ updatedAt: -1 }).lean();
-
     const withCount = await Promise.all(
       conversations.map(async (conv) => ({
         ...conv,
@@ -78,7 +128,6 @@ app.get("/api/conversations", async (_req, res) => {
         messageCount: await Message.countDocuments({ conversationId: conv._id }),
       }))
     );
-
     res.json(withCount);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -88,8 +137,13 @@ app.get("/api/conversations", async (_req, res) => {
 // Tạo hội thoại mới
 app.post("/api/conversations", async (req, res) => {
   try {
-    const { title = "New Conversation", model = null, systemPrompt = null } = req.body || {};
-    const conv = await Conversation.create({ title, model, systemPrompt });
+    const { title = "New Conversation", model = null, systemPrompt = null, useCustomPrompt = false } = req.body || {};
+    const conv = await Conversation.create({ 
+      title, 
+      model, 
+      systemPrompt: useCustomPrompt ? systemPrompt : null,
+      useCustomPrompt 
+    });
     res.status(201).json({ ...conv.toObject(), id: conv._id, messageCount: 0 });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -160,7 +214,7 @@ app.get("/api/conversations/:id/messages", async (req, res) => {
   }
 });
 
-// Gửi tin nhắn → nhận phản hồi AI
+// Gửi tin nhắn → nhận phản hồi AI (đã tích hợp nhân cách Hải)
 app.post("/api/conversations/:id/messages", async (req, res) => {
   try {
     const convId = req.params.id;
@@ -177,8 +231,17 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
     // Lấy toàn bộ lịch sử
     const history = await Message.find({ conversationId: convId }).sort({ createdAt: 1 }).lean();
 
-    const model        = reqModel        || conv.model        || DEFAULT_MODEL;
-    const systemPrompt = reqSystemPrompt || conv.systemPrompt;
+    const model = reqModel || conv.model || DEFAULT_MODEL;
+    
+    // QUAN TRỌNG: Chọn system prompt
+    let systemPrompt;
+    if (conv.useCustomPrompt && reqSystemPrompt) {
+      systemPrompt = reqSystemPrompt;
+    } else if (conv.systemPrompt && conv.useCustomPrompt) {
+      systemPrompt = conv.systemPrompt;
+    } else {
+      systemPrompt = DEFAULT_SYSTEM_PROMPT;
+    }
 
     const groqMessages = [];
     if (systemPrompt) groqMessages.push({ role: "system", content: systemPrompt });
@@ -193,6 +256,7 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
       model,
       messages: groqMessages,
       max_tokens: 4096,
+      temperature: 0.7,
     });
 
     const aiContent = completion.choices[0]?.message?.content ?? "";
@@ -235,11 +299,34 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
   }
 });
 
+// ─── Endpoint đặc biệt: Hỏi về Hải hoặc CRABOR ─────────────────────────────────
+app.post("/api/ask-about-hai", async (req, res) => {
+  try {
+    const { question } = req.body;
+    if (!question) return res.status(400).json({ error: "Question is required" });
+
+    const response = await groq.chat.completions.create({
+      model: DEFAULT_MODEL,
+      messages: [
+        { role: "system", content: DEFAULT_SYSTEM_PROMPT },
+        { role: "user", content: question }
+      ],
+      max_tokens: 500,
+      temperature: 0.7,
+    });
+
+    res.json({ answer: response.choices[0]?.message?.content });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Route mặc định trả về index.html ──────────────────────────────────────────
 app.get('/', (_req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 app.listen(PORT, () => {
-  console.log(`GroqChat server đang chạy tại http://localhost:${PORT}`);
+  console.log(`🦀 CRAB AI Server đang chạy tại http://localhost:${PORT}`);
+  console.log(`🦀 AI được tạo ra bởi Kiều Thanh Hải (Founder CRABOR)`);
 });
