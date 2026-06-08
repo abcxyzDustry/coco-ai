@@ -1,6 +1,11 @@
 import express from "express";
 import cors from "cors";
 import mongoose from "mongoose";
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -79,29 +84,11 @@ const DEFAULT_MODEL = "@cf/meta/llama-3.3-70b-instruct";
 app.use(cors());
 app.use(express.json());
 
-// ─── ROOT ROUTE (QUAN TRỌNG - sửa lỗi "Cannot GET /") ─────────────────────────
-app.get("/", (_req, res) => {
-  res.json({
-    name: "🦀 CRAB AI Assistant API",
-    version: "1.0.0",
-    status: "online",
-    endpoints: {
-      health: "GET /api/healthz",
-      models: "GET /api/models",
-      conversations: "GET /api/conversations",
-      createConversation: "POST /api/conversations",
-      conversationDetail: "GET /api/conversations/:id",
-      deleteConversation: "DELETE /api/conversations/:id",
-      updateTitle: "PATCH /api/conversations/:id/title",
-      messages: "GET /api/conversations/:id/messages",
-      sendMessage: "POST /api/conversations/:id/messages"
-    },
-    author: "Kiều Thanh Hải - CRABOR",
-    documentation: "https://github.com/your-repo"
-  });
-});
+// ─── Serve static files (index.html cùng cấp) ─────────────────────────────────
+// Phục vụ file tĩnh từ thư mục hiện tại
+app.use(express.static(__dirname));
 
-// ─── Health ───────────────────────────────────────────────────────────────────
+// ─── API routes (phải ĐẶT TRƯỚC route cho index.html) ─────────────────────────
 app.get("/api/healthz", (_req, res) => {
   res.json({ 
     status: "ok",
@@ -110,12 +97,10 @@ app.get("/api/healthz", (_req, res) => {
   });
 });
 
-// ─── Models ───────────────────────────────────────────────────────────────────
 app.get("/api/models", (_req, res) => {
   res.json(AVAILABLE_MODELS);
 });
 
-// ─── Conversations ────────────────────────────────────────────────────────────
 app.get("/api/conversations", async (_req, res) => {
   try {
     const conversations = await Conversation.find().sort({ updatedAt: -1 }).lean();
@@ -185,7 +170,6 @@ app.patch("/api/conversations/:id/title", async (req, res) => {
   }
 });
 
-// ─── Messages ─────────────────────────────────────────────────────────────────
 app.get("/api/conversations/:id/messages", async (req, res) => {
   try {
     const messages = await Message
@@ -233,7 +217,6 @@ async function callCloudflareAPI(messages, model, systemPrompt = null) {
   };
 }
 
-// Gửi tin nhắn → nhận phản hồi AI từ Cloudflare
 app.post("/api/conversations/:id/messages", async (req, res) => {
   try {
     const convId = req.params.id;
@@ -243,10 +226,8 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
     const conv = await Conversation.findById(convId);
     if (!conv) return res.status(404).json({ error: "Conversation not found" });
 
-    // Lưu tin nhắn người dùng
     await Message.create({ conversationId: convId, role: "user", content });
 
-    // Lấy toàn bộ lịch sử
     const history = await Message.find({ conversationId: convId }).sort({ createdAt: 1 }).lean();
     
     const model = reqModel || conv.model || DEFAULT_MODEL;
@@ -256,7 +237,6 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
           ? conv.systemPrompt 
           : DEFAULT_SYSTEM_PROMPT);
 
-    // Chuẩn bị messages cho Cloudflare
     const cloudflareMessages = [];
     for (const msg of history) {
       if (msg.role === "user" || msg.role === "assistant") {
@@ -264,7 +244,6 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
       }
     }
 
-    // Gọi Cloudflare API
     const { content: aiContent, usage } = await callCloudflareAPI(
       cloudflareMessages,
       model,
@@ -273,7 +252,6 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
 
     const tokens = usage?.completion_tokens ?? null;
 
-    // Lưu phản hồi AI
     const aiMessage = await Message.create({
       conversationId: convId,
       role: "assistant",
@@ -282,10 +260,8 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
       tokens,
     });
 
-    // Cập nhật thời gian + model của conversation
     await Conversation.findByIdAndUpdate(convId, { model, updatedAt: new Date() });
 
-    // Tự động tạo tiêu đề nếu vẫn là mặc định
     if (conv.title === "New Conversation") {
       try {
         const { content: generatedTitle } = await callCloudflareAPI(
@@ -313,12 +289,9 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
   }
 });
 
-// ─── Handle 404 - Bắt các route không tồn tại ─────────────────────────────────
-app.use("*", (_req, res) => {
-  res.status(404).json({
-    error: "Route not found",
-    message: "Please check API documentation at GET /"
-  });
+// ─── Tất cả các route không phải API sẽ trả về index.html ─────────────────────
+app.get("*", (_req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // ─── Start server ─────────────────────────────────────────────────────────────
@@ -326,5 +299,6 @@ app.listen(PORT, () => {
   console.log(`\n🦀 CRAB AI Assistant Server`);
   console.log(`📡 Running at http://localhost:${PORT}`);
   console.log(`✅ Health check: http://localhost:${PORT}/api/healthz`);
-  console.log(`📚 API docs: http://localhost:${PORT}/\n`);
+  console.log(`🎨 Frontend: http://localhost:${PORT}`);
+  console.log(`📁 Serving index.html from: ${__dirname}\n`);
 });
