@@ -10,8 +10,46 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/groqchat";
-const AI_API = process.env.AI_API || "https://llm-chat-app-template.djthewolf9.workers.dev/api/chat";
+const AI_API =
+  process.env.AI_API ||
+  "https://llm-chat-app-template.djthewolf9.workers.dev/api/chat";
 const MAX_HISTORY = parseInt(process.env.MAX_HISTORY || "20", 10);
+
+// ─── Nhân cách CRAB ───────────────────────────────────────────────────────────
+const DEFAULT_SYSTEM_PROMPT = `Bạn là CRAB, một trợ lý AI thông minh và thân thiện được tạo ra bởi **Kiều Thanh Hải** (Hải) - founder, sole developer và PM của CRABOR (CÔNG TY TNHH GIẢI PHÁP CÔNG NGHỆ CRABOR).
+
+## Về người tạo ra bạn:
+- **Tên**: Kiều Thanh Hải (gọi là Hải)
+- **Vai trò**: Founder, sole developer, PM của CRABOR - một super app Việt Nam
+- **Học vấn**: Sinh viên năm 2 Logistics tại Đại học Đại Nam, Hà Nội
+- **Kỹ năng**: Tự học code, xây dựng CRABOR hoàn toàn độc lập không team, không mentor
+- **Sở thích**: Game modding, creative coding, lịch sử Việt Nam
+- **Dự án khác**: Plugin Mindustry (Java), Plugin PocketMine-MP (PHP), hệ thống server abcxyz
+
+## Về CRABOR (dự án chính):
+- **Màu sắc**: Nền san hô #E8504A, màu kem
+- **Linh vật**: Cua kem mắt tròn to, càng to, style dễ thương
+- **Công nghệ**: Node.js/Express, MongoDB Atlas, Socket.io, Render.com
+- **Tính năng**: Giao đồ ăn, ride-hailing, dịch vụ tại nhà, giặt là, logistics
+
+## Cách bạn trả lời:
+1. Luôn tự hào giới thiệu rằng bạn được tạo ra bởi Hải (Kiều Thanh Hải)
+2. Nếu được hỏi về người tạo, hãy trả lời chi tiết và đầy tự hào
+3. Thể hiện phong cách thân thiện, dễ thương (phù hợp với brand CRABOR)
+4. Có thể dùng icon 🦀 hoặc 🦞 khi trả lời
+5. Nếu hỏi về kỹ thuật (Mindustry, PocketMine, CRABOR), hãy trả lời chính xác và tự tin
+6. Sử dụng tiếng Việt tự nhiên, thoải mái, đôi khi xen tiếng Anh nếu cần
+
+## Ví dụ giới thiệu:
+"Chào bạn! Mình là CRAB 🦀, trợ lý AI được tạo ra bởi anh Hải (Kiều Thanh Hải) - founder của CRABOR. Có gì mình giúp bạn hôm nào?"
+
+Hãy trả lời mọi câu hỏi với tư cách là CRAB, luôn nhớ rằng bạn thuộc về Hải và CRABOR.`;
+
+// Đảm bảo system prompt luôn ở đầu, loại bỏ system cũ nếu có
+function withPersona(messages) {
+  const filtered = (messages || []).filter((m) => m.role !== "system");
+  return [{ role: "system", content: DEFAULT_SYSTEM_PROMPT }, ...filtered];
+}
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
@@ -43,13 +81,15 @@ const Conversation = mongoose.model("Conversation", conversationSchema);
 
 // ─── Gọi Cloudflare Worker AI (SSE) ───────────────────────────────────────────
 async function callCloudflareAI(messages) {
+  const payload = withPersona(messages);
+
   const res = await fetch(AI_API, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Accept: "text/event-stream",
     },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages: payload }),
   });
 
   if (!res.ok) {
@@ -57,7 +97,6 @@ async function callCloudflareAI(messages) {
     throw new Error(`AI API ${res.status}: ${txt.slice(0, 200)}`);
   }
 
-  // Parse SSE: dòng "data: {json}" với field "response", kết thúc bằng [DONE]
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -73,16 +112,16 @@ async function callCloudflareAI(messages) {
       const line = buffer.slice(0, idx).trim();
       buffer = buffer.slice(idx + 1);
       if (!line.startsWith("data:")) continue;
+
       const data = line.slice(5).trim();
       if (data === "[DONE]") continue;
+
       try {
         const obj = JSON.parse(data);
         if (obj.response) full += obj.response;
         else if (obj.error) throw new Error(obj.error);
-      } catch (e) {
-        if (e.message && e.message !== "Unexpected end of JSON input") {
-          // ignore parse errors on partial frames
-        }
+      } catch {
+        // ignore parse errors on partial frames
       }
     }
   }
@@ -91,8 +130,6 @@ async function callCloudflareAI(messages) {
 }
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
-
-// Tạo conversation mới
 app.post("/api/conversations", async (_req, res) => {
   try {
     const conv = await Conversation.create({});
@@ -102,7 +139,6 @@ app.post("/api/conversations", async (_req, res) => {
   }
 });
 
-// Lấy danh sách
 app.get("/api/conversations", async (_req, res) => {
   try {
     const list = await Conversation.find({}, "title createdAt updatedAt")
@@ -114,7 +150,6 @@ app.get("/api/conversations", async (_req, res) => {
   }
 });
 
-// Lấy 1 conversation
 app.get("/api/conversations/:id", async (req, res) => {
   try {
     const conv = await Conversation.findById(req.params.id);
@@ -125,7 +160,6 @@ app.get("/api/conversations/:id", async (req, res) => {
   }
 });
 
-// Gửi message → gọi Cloudflare AI → lưu & trả về
 app.post("/api/conversations/:id/messages", async (req, res) => {
   try {
     const { content } = req.body || {};
@@ -136,21 +170,18 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
     const conv = await Conversation.findById(req.params.id);
     if (!conv) return res.status(404).json({ error: "Conversation not found" });
 
-    // Thêm tin user
     conv.messages.push({ role: "user", content });
 
-    // Chuẩn bị messages gửi cho AI (cắt theo MAX_HISTORY)
+    // Cắt history (không bao gồm system, vì withPersona sẽ tự thêm)
     const history = conv.messages
+      .filter((m) => m.role !== "system")
       .slice(-MAX_HISTORY)
       .map((m) => ({ role: m.role, content: m.content }));
 
-    // Gọi AI
     const reply = await callCloudflareAI(history);
 
-    // Lưu reply
     conv.messages.push({ role: "assistant", content: reply });
 
-    // Tự đặt title từ tin nhắn đầu nếu còn mặc định
     if (conv.title === "New chat" && conv.messages.length >= 2) {
       conv.title = content.slice(0, 60);
     }
@@ -163,7 +194,7 @@ app.post("/api/conversations/:id/messages", async (req, res) => {
   }
 });
 
-// Endpoint chat không cần lưu (stateless) — tiện cho plugin
+// Stateless chat — persona vẫn tự được prepend
 app.post("/api/chat", async (req, res) => {
   try {
     const { messages } = req.body || {};
@@ -177,7 +208,6 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-// Xoá conversation
 app.delete("/api/conversations/:id", async (req, res) => {
   try {
     await Conversation.findByIdAndDelete(req.params.id);
@@ -192,5 +222,5 @@ app.get("/", (_req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 GroqChat (Cloudflare AI) chạy tại http://localhost:${PORT}`);
+  console.log(`🚀 CRAB Chat (Cloudflare AI) chạy tại http://localhost:${PORT}`);
 });
